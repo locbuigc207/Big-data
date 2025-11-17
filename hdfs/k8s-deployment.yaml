@@ -1,0 +1,490 @@
+# ===================================================
+# Kubernetes Deployment for Batch Processing Layer
+# ===================================================
+
+---
+# HDFS NameNode Deployment
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hdfs-namenode
+  namespace: edu-analytics
+spec:
+  serviceName: hdfs-namenode
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hdfs-namenode
+  template:
+    metadata:
+      labels:
+        app: hdfs-namenode
+    spec:
+      containers:
+      - name: namenode
+        image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+        ports:
+        - containerPort: 9000
+          name: fs
+        - containerPort: 9870
+          name: http
+        env:
+        - name: CLUSTER_NAME
+          value: "edu-analytics-cluster"
+        - name: CORE_CONF_fs_defaultFS
+          value: "hdfs://hdfs-namenode:9000"
+        volumeMounts:
+        - name: hdfs-namenode-data
+          mountPath: /hadoop/dfs/name
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+  volumeClaimTemplates:
+  - metadata:
+      name: hdfs-namenode-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 50Gi
+
+---
+# HDFS NameNode Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: hdfs-namenode
+  namespace: edu-analytics
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9000
+    targetPort: 9000
+    name: fs
+  - port: 9870
+    targetPort: 9870
+    name: http
+  selector:
+    app: hdfs-namenode
+
+---
+# HDFS DataNode Deployment
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hdfs-datanode
+  namespace: edu-analytics
+spec:
+  serviceName: hdfs-datanode
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hdfs-datanode
+  template:
+    metadata:
+      labels:
+        app: hdfs-datanode
+    spec:
+      containers:
+      - name: datanode
+        image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+        ports:
+        - containerPort: 9864
+          name: http
+        - containerPort: 9866
+          name: data
+        env:
+        - name: CORE_CONF_fs_defaultFS
+          value: "hdfs://hdfs-namenode:9000"
+        - name: HDFS_CONF_dfs_datanode_data_dir
+          value: "file:///hadoop/dfs/data"
+        volumeMounts:
+        - name: hdfs-datanode-data
+          mountPath: /hadoop/dfs/data
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+  volumeClaimTemplates:
+  - metadata:
+      name: hdfs-datanode-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 100Gi
+
+---
+# Spark Master Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-master
+  namespace: edu-analytics
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark-master
+  template:
+    metadata:
+      labels:
+        app: spark-master
+    spec:
+      containers:
+      - name: spark-master
+        image: bitnami/spark:3.5.0
+        ports:
+        - containerPort: 7077
+          name: spark
+        - containerPort: 8080
+          name: http
+        env:
+        - name: SPARK_MODE
+          value: "master"
+        - name: SPARK_MASTER_HOST
+          value: "spark-master"
+        - name: SPARK_MASTER_PORT
+          value: "7077"
+        - name: SPARK_MASTER_WEBUI_PORT
+          value: "8080"
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+
+---
+# Spark Master Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-master
+  namespace: edu-analytics
+spec:
+  type: ClusterIP
+  ports:
+  - port: 7077
+    targetPort: 7077
+    name: spark
+  - port: 8080
+    targetPort: 8080
+    name: http
+  selector:
+    app: spark-master
+
+---
+# Spark Worker Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-worker
+  namespace: edu-analytics
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: spark-worker
+  template:
+    metadata:
+      labels:
+        app: spark-worker
+    spec:
+      containers:
+      - name: spark-worker
+        image: bitnami/spark:3.5.0
+        ports:
+        - containerPort: 8081
+          name: http
+        env:
+        - name: SPARK_MODE
+          value: "worker"
+        - name: SPARK_MASTER_URL
+          value: "spark://spark-master:7077"
+        - name: SPARK_WORKER_CORES
+          value: "4"
+        - name: SPARK_WORKER_MEMORY
+          value: "8g"
+        resources:
+          requests:
+            memory: "8Gi"
+            cpu: "4"
+          limits:
+            memory: "16Gi"
+            cpu: "8"
+
+---
+# MongoDB Deployment
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: edu-analytics
+spec:
+  serviceName: mongodb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+      - name: mongodb
+        image: mongo:7.0
+        ports:
+        - containerPort: 27017
+        env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: username
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: password
+        - name: MONGO_INITDB_DATABASE
+          value: "edu_analytics"
+        volumeMounts:
+        - name: mongodb-data
+          mountPath: /data/db
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+  volumeClaimTemplates:
+  - metadata:
+      name: mongodb-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 50Gi
+
+---
+# MongoDB Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: edu-analytics
+spec:
+  type: ClusterIP
+  ports:
+  - port: 27017
+    targetPort: 27017
+  selector:
+    app: mongodb
+
+---
+# PostgreSQL Deployment
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgresql
+  namespace: edu-analytics
+spec:
+  serviceName: postgresql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresql
+  template:
+    metadata:
+      labels:
+        app: postgresql
+    spec:
+      containers:
+      - name: postgresql
+        image: postgres:16
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: "edu_analytics"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secret
+              key: username
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secret
+              key: password
+        volumeMounts:
+        - name: postgresql-data
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+  volumeClaimTemplates:
+  - metadata:
+      name: postgresql-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 30Gi
+
+---
+# PostgreSQL Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql
+  namespace: edu-analytics
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app: postgresql
+
+---
+# Batch Ingestion Job
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: batch-ingestion
+  namespace: edu-analytics
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: batch-ingestion
+            image: your-registry/edu-analytics-batch-ingestion:latest
+            env:
+            - name: HDFS_URI
+              value: "hdfs://hdfs-namenode:9000"
+            - name: DATA_PATH
+              value: "/data"
+            volumeMounts:
+            - name: data-volume
+              mountPath: /data
+            resources:
+              requests:
+                memory: "4Gi"
+                cpu: "2"
+              limits:
+                memory: "8Gi"
+                cpu: "4"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: batch-data-pvc
+          restartPolicy: OnFailure
+
+---
+# Batch Processing Job
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: batch-processing
+  namespace: edu-analytics
+spec:
+  schedule: "30 2 * * *"  # Daily at 2:30 AM (after ingestion)
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: batch-processing
+            image: your-registry/edu-analytics-batch-processing:latest
+            env:
+            - name: HDFS_URI
+              value: "hdfs://hdfs-namenode:9000"
+            - name: SPARK_MASTER
+              value: "spark://spark-master:7077"
+            resources:
+              requests:
+                memory: "6Gi"
+                cpu: "4"
+              limits:
+                memory: "12Gi"
+                cpu: "8"
+          restartPolicy: OnFailure
+
+---
+# ML Pipeline Job
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ml-pipeline
+  namespace: edu-analytics
+spec:
+  schedule: "0 4 * * 0"  # Weekly on Sunday at 4 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: ml-pipeline
+            image: your-registry/edu-analytics-ml-pipeline:latest
+            env:
+            - name: HDFS_URI
+              value: "hdfs://hdfs-namenode:9000"
+            - name: SPARK_MASTER
+              value: "spark://spark-master:7077"
+            resources:
+              requests:
+                memory: "8Gi"
+                cpu: "4"
+              limits:
+                memory: "16Gi"
+                cpu: "8"
+          restartPolicy: OnFailure
+
+---
+# Secrets
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mongodb-secret
+  namespace: edu-analytics
+type: Opaque
+stringData:
+  username: admin
+  password: your-secure-password-here
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgresql-secret
+  namespace: edu-analytics
+type: Opaque
+stringData:
+  username: admin
+  password: your-secure-password-here
+
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: edu-analytics
