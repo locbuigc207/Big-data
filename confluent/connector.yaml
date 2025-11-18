@@ -1,0 +1,22 @@
+apiVersion: platform.confluent.io/v1beta1
+kind: Connector
+metadata:
+  name: postgres-debezium
+  namespace: confluent
+spec:
+  clusterRef:
+    name: connect             # must match your KafkaConnect CR name
+    namespace: confluent
+  class: io.debezium.connector.postgresql.PostgresConnector
+  taskMax: 1
+  configs:
+    database.hostname: postgres
+    database.port: "5432"
+    database.user: cdc
+    database.password: cdc
+    database.dbname: cdc
+    database.server.name: postgres
+    plugin.name: pgoutput
+    table.include.list: public.customers
+    transforms: unwrap
+    transforms.unwrap.type: io.debezium.transforms.ExtractNewRecordState

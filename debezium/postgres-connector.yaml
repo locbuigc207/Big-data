@@ -1,0 +1,43 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: debezium-connector-postgres
+  labels:
+    strimzi.io/cluster: debezium-connect-cluster
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  tasksMax: 1
+  config:
+    tasks.max: 1
+    database.hostname: postgres
+    database.port: 5432
+    database.user: cdc
+    # ${secrets:debezium/debezium-secret:username}
+    database.password: cdc
+    # ${secrets:debezium/debezium-secret:password}
+    database.dbname: cdc
+    topic.prefix: postgres
+    plugin.name: pgoutput
+    
+    table.include.list: public.customers
+    schema.history.internal.kafka.bootstrap.servers: debezium-cluster-kafka-bootstrap:9092
+    schema.history.internal.kafka.topic: schema-changes.customers
+
+    transforms: unwrap
+    transforms.unwrap.type: io.debezium.transforms.ExtractNewRecordState
+
+    transforms.unwrap.delete.handling.mode: drop
+
+
+    # publication.autocreate.mode: filtered
+    # delete.tombstone.handling.mode: rewrite
+    # converters: timestampConverter,
+    # timestampConverter.type: oryanmoshe.kafka.connect.util.TimestampConverter
+    # key.converter: org.apache.kafka.connect.json.JsonConverter
+    # value.converter: org.apache.kafka.connect.json.JsonConverter
+        # key.converter.schemas.enable: false
+    # value.converter.schemas.enable: false
+    # snapshot.mode: always
+    # message.key.columns: public.actor:actor_id
+        # transforms.unwrap.add.fields: op:_meta_op,table:_meta_table,lsn:_meta_lsn,source.ts_ms:_meta_event_ts,schema:_meta_schema
+    # transforms.unwrap.add.headers: db
