@@ -1,6 +1,6 @@
 """
-Batch Layer - Data Ingestion Module
-Loads CSV/JSON data into HDFS and performs initial validation
+Batch Ingestion for Kubernetes Environment
+Uploads CSV files to HDFS with date partitioning
 """
 
 from pyspark.sql import SparkSession
@@ -9,8 +9,8 @@ from pyspark.sql.types import *
 import logging
 from datetime import datetime
 import os
+import sys
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -18,38 +18,46 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class BatchDataIngestion:
-    """Handles batch data ingestion from CSV/JSON to HDFS"""
+class BatchIngestionK8s:
+    """Batch data ingestion for Kubernetes HDFS"""
     
-    def __init__(self, hdfs_uri="hdfs://namenode:9000", local_data_path="./data"):
+    def __init__(self, 
+                 hdfs_namenode="hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000",
+                 local_data_path="/data"):
         """
         Initialize batch ingestion
         
         Args:
-            hdfs_uri: HDFS namenode URI
-            local_data_path: Local path containing CSV/JSON files
+            hdfs_namenode: HDFS namenode URI in K8s
+            local_data_path: Local path with CSV files
         """
-        self.hdfs_uri = hdfs_uri
+        self.hdfs_namenode = hdfs_namenode
         self.local_data_path = local_data_path
+        self.ingestion_date = datetime.now().strftime("%Y-%m-%d")
         
-        # Initialize Spark session with HDFS support
+        # Initialize Spark with HDFS config
         self.spark = SparkSession.builder \
-            .appName("EduAnalytics-BatchIngestion") \
+            .appName("EduAnalytics-BatchIngestion-K8s") \
+            .config("spark.master", "k8s://https://kubernetes.default.svc:443") \
+            .config("spark.kubernetes.namespace", "bigdata") \
+            .config("spark.hadoop.fs.defaultFS", hdfs_namenode) \
+            .config("spark.hadoop.fs.hdfs.impl", "org.apache.hadoop.hdfs.DistributedFileSystem") \
             .config("spark.sql.adaptive.enabled", "true") \
             .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
-            .config("spark.hadoop.fs.defaultFS", hdfs_uri) \
-            .config("spark.driver.memory", "4g") \
-            .config("spark.executor.memory", "4g") \
-            .config("spark.sql.shuffle.partitions", "8") \
+            .config("spark.driver.memory", "2g") \
+            .config("spark.executor.memory", "2g") \
+            .config("spark.executor.instances", "3") \
+            .config("spark.sql.shuffle.partitions", "10") \
             .getOrCreate()
         
         logger.info(f"Spark session initialized: {self.spark.version}")
-        logger.info(f"HDFS URI: {hdfs_uri}")
+        logger.info(f"HDFS Namenode: {hdfs_namenode}")
+        logger.info(f"Ingestion date: {self.ingestion_date}")
+    
+    def get_schema(self, table_name):
+        """Define schemas for each table"""
         
-    def define_schemas(self):
-        """Define schemas for all data sources"""
-        
-        self.schemas = {
+        schemas = {
             'students': StructType([
                 StructField("student_id", StringType(), False),
                 StructField("full_name", StringType(), False),
@@ -115,159 +123,181 @@ class BatchDataIngestion:
             ])
         }
         
-        logger.info("Data schemas defined")
+        return schemas.get(table_name)
     
     def validate_data(self, df, table_name):
-        """
-        Validate data quality
+        """Validate data quality and return metrics"""
         
-        Args:
-            df: DataFrame to validate
-            table_name: Name of the table
-            
-        Returns:
-            Validated DataFrame with quality metrics
-        """
         logger.info(f"Validating {table_name}...")
         
-        # Count records
+        # Basic stats
         total_count = df.count()
         
-        # Check for nulls in key columns
+        # Check for nulls
         null_counts = {}
         for col_name in df.columns:
             null_count = df.filter(col(col_name).isNull()).count()
             if null_count > 0:
                 null_counts[col_name] = null_count
-                logger.warning(f"{table_name}.{col_name}: {null_count} null values")
+                logger.warning(f"{table_name}.{col_name}: {null_count} nulls")
         
-        # Check for duplicates (based on first column - usually ID)
+        # Check duplicates on first column (usually ID)
         id_column = df.columns[0]
         duplicate_count = df.groupBy(id_column).count() \
             .filter(col("count") > 1).count()
         
         if duplicate_count > 0:
-            logger.warning(f"{table_name}: {duplicate_count} duplicate IDs found")
+            logger.warning(f"{table_name}: {duplicate_count} duplicate IDs")
         
-        # Quality metrics
-        quality_metrics = {
+        metrics = {
             'table': table_name,
             'total_records': total_count,
             'null_counts': null_counts,
             'duplicate_ids': duplicate_count,
-            'validation_timestamp': datetime.now().isoformat()
+            'ingestion_date': self.ingestion_date
         }
         
-        logger.info(f"{table_name} validation complete: {total_count} records")
+        logger.info(f"✓ {table_name}: {total_count} records validated")
         
-        return df, quality_metrics
+        return df, metrics
     
-    def ingest_csv_to_hdfs(self, table_name, csv_path):
+    def ingest_table(self, table_name):
         """
-        Ingest CSV file to HDFS with validation
+        Ingest a single table from CSV to HDFS
         
         Args:
-            table_name: Name of the table
-            csv_path: Path to CSV file
-            
-        Returns:
-            Validated DataFrame
+            table_name: Name of the table (e.g., 'students')
         """
-        logger.info(f"Ingesting {table_name} from {csv_path}")
+        csv_file = f"{self.local_data_path}/{table_name}.csv"
+        
+        if not os.path.exists(csv_file):
+            logger.error(f"File not found: {csv_file}")
+            return None
+        
+        logger.info(f"Processing {table_name} from {csv_file}")
+        
+        # Read CSV with schema
+        schema = self.get_schema(table_name)
+        df = self.spark.read \
+            .option("header", "true") \
+            .option("encoding", "UTF-8") \
+            .schema(schema) \
+            .csv(csv_file)
+        
+        # Validate
+        df_validated, metrics = self.validate_data(df, table_name)
+        
+        # Add metadata
+        df_final = df_validated \
+            .withColumn("ingestion_timestamp", current_timestamp()) \
+            .withColumn("ingestion_date", lit(self.ingestion_date))
+        
+        # Write to HDFS with date partitioning
+        hdfs_path = f"{self.hdfs_namenode}/raw/{table_name}/{self.ingestion_date}"
         
         try:
-            # Read CSV with schema
-            df = self.spark.read \
-                .option("header", "true") \
-                .option("encoding", "UTF-8") \
-                .option("inferSchema", "false") \
-                .schema(self.schemas[table_name]) \
-                .csv(csv_path)
+            df_final.write \
+                .mode("overwrite") \
+                .parquet(hdfs_path)
             
-            # Validate data
-            df_validated, metrics = self.validate_data(df, table_name)
+            logger.info(f"✓ Written to HDFS: {hdfs_path}")
             
-            # Add ingestion metadata
-            df_final = df_validated \
-                .withColumn("ingestion_timestamp", current_timestamp()) \
-                .withColumn("source_file", lit(csv_path))
-            
-            # Write to HDFS in parquet format (partitioned by semester if applicable)
-            hdfs_path = f"{self.hdfs_uri}/edu-analytics/raw/{table_name}"
-            
-            if 'semester' in df_final.columns:
-                df_final.write \
-                    .mode("overwrite") \
-                    .partitionBy("semester") \
-                    .parquet(hdfs_path)
-                logger.info(f"Written to HDFS (partitioned by semester): {hdfs_path}")
-            else:
-                df_final.write \
-                    .mode("overwrite") \
-                    .parquet(hdfs_path)
-                logger.info(f"Written to HDFS: {hdfs_path}")
-            
-            # Log quality metrics to HDFS
-            metrics_path = f"{self.hdfs_uri}/edu-analytics/quality_metrics/{table_name}"
+            # Save quality metrics
+            metrics_path = f"{self.hdfs_namenode}/quality_metrics/{table_name}/{self.ingestion_date}"
             metrics_df = self.spark.createDataFrame([metrics])
             metrics_df.write \
-                .mode("append") \
+                .mode("overwrite") \
                 .json(metrics_path)
             
             return df_final
             
         except Exception as e:
-            logger.error(f"Error ingesting {table_name}: {str(e)}")
+            logger.error(f"Failed to write {table_name}: {str(e)}")
             raise
     
-    def ingest_all_tables(self):
-        """Ingest all CSV files to HDFS"""
-        
-        self.define_schemas()
+    def ingest_all(self):
+        """Ingest all tables"""
         
         tables = [
             'students', 'teachers', 'courses', 'classes',
             'enrollments', 'grades', 'sessions', 'attendance'
         ]
         
-        ingested_data = {}
+        results = {}
+        success_count = 0
+        
+        logger.info("=" * 70)
+        logger.info("BATCH INGESTION - Starting")
+        logger.info("=" * 70)
         
         for table in tables:
-            csv_path = f"{self.local_data_path}/{table}.csv"
-            
-            if os.path.exists(csv_path):
-                try:
-                    df = self.ingest_csv_to_hdfs(table, csv_path)
-                    ingested_data[table] = df
-                    logger.info(f"✓ {table} ingested successfully")
-                except Exception as e:
-                    logger.error(f"✗ Failed to ingest {table}: {str(e)}")
-            else:
-                logger.warning(f"CSV file not found: {csv_path}")
+            try:
+                df = self.ingest_table(table)
+                if df is not None:
+                    results[table] = df
+                    success_count += 1
+            except Exception as e:
+                logger.error(f"Failed to ingest {table}: {str(e)}")
         
-        logger.info(f"Batch ingestion complete: {len(ingested_data)}/{len(tables)} tables")
+        # Summary
+        logger.info("\n" + "=" * 70)
+        logger.info("INGESTION SUMMARY")
+        logger.info("=" * 70)
         
-        return ingested_data
+        for table, df in results.items():
+            count = df.count()
+            logger.info(f"{table:15s}: {count:10,d} records")
+        
+        logger.info("=" * 70)
+        logger.info(f"✓ Completed: {success_count}/{len(tables)} tables ingested")
+        logger.info("=" * 70)
+        
+        return results
     
-    def read_from_hdfs(self, table_name):
-        """
-        Read data from HDFS
+    def create_hive_tables(self):
+        """Create Hive external tables pointing to HDFS data"""
         
-        Args:
-            table_name: Name of the table to read
+        logger.info("Creating Hive external tables...")
+        
+        tables = [
+            'students', 'teachers', 'courses', 'classes',
+            'enrollments', 'grades', 'sessions', 'attendance'
+        ]
+        
+        for table in tables:
+            try:
+                hdfs_path = f"{self.hdfs_namenode}/raw/{table}"
+                
+                self.spark.sql(f"""
+                    CREATE EXTERNAL TABLE IF NOT EXISTS {table}
+                    USING parquet
+                    LOCATION '{hdfs_path}'
+                """)
+                
+                logger.info(f"✓ Created external table: {table}")
+                
+            except Exception as e:
+                logger.error(f"Failed to create table {table}: {str(e)}")
+    
+    def verify_ingestion(self):
+        """Verify data was written correctly to HDFS"""
+        
+        logger.info("Verifying ingestion...")
+        
+        tables = [
+            'students', 'teachers', 'courses', 'classes',
+            'enrollments', 'grades', 'sessions', 'attendance'
+        ]
+        
+        for table in tables:
+            hdfs_path = f"{self.hdfs_namenode}/raw/{table}/{self.ingestion_date}"
             
-        Returns:
-            DataFrame
-        """
-        hdfs_path = f"{self.hdfs_uri}/edu-analytics/raw/{table_name}"
-        
-        try:
-            df = self.spark.read.parquet(hdfs_path)
-            logger.info(f"Read {df.count()} records from {hdfs_path}")
-            return df
-        except Exception as e:
-            logger.error(f"Error reading {table_name} from HDFS: {str(e)}")
-            raise
+            try:
+                df = self.spark.read.parquet(hdfs_path)
+                count = df.count()
+                logger.info(f"✓ {table}: {count:,} records in HDFS")
+            except Exception as e:
+                logger.error(f"✗ {table}: Failed to read from HDFS - {str(e)}")
     
     def cleanup(self):
         """Stop Spark session"""
@@ -277,43 +307,35 @@ class BatchDataIngestion:
 
 
 def main():
-    """Main function for batch ingestion"""
+    """Main execution"""
     
-    # Configuration
-    HDFS_URI = os.getenv("HDFS_URI", "hdfs://namenode:9000")
-    DATA_PATH = os.getenv("DATA_PATH", "./data")
-    
-    logger.info("=" * 70)
-    logger.info("BATCH DATA INGESTION - Starting")
-    logger.info("=" * 70)
+    # Get config from environment (set in K8s ConfigMap)
+    HDFS_NAMENODE = os.getenv(
+        "HDFS_NAMENODE", 
+        "hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000"
+    )
+    DATA_PATH = os.getenv("DATA_PATH", "/data")
     
     try:
-        # Initialize ingestion
-        ingestion = BatchDataIngestion(
-            hdfs_uri=HDFS_URI,
+        ingestion = BatchIngestionK8s(
+            hdfs_namenode=HDFS_NAMENODE,
             local_data_path=DATA_PATH
         )
         
         # Ingest all tables
-        ingested_data = ingestion.ingest_all_tables()
+        ingestion.ingest_all()
         
-        # Show summary
-        logger.info("\n" + "=" * 70)
-        logger.info("INGESTION SUMMARY")
-        logger.info("=" * 70)
+        # Create Hive tables
+        ingestion.create_hive_tables()
         
-        for table_name, df in ingested_data.items():
-            count = df.count()
-            columns = len(df.columns)
-            logger.info(f"{table_name:15s}: {count:8,d} rows, {columns:3d} columns")
+        # Verify
+        ingestion.verify_ingestion()
         
-        logger.info("=" * 70)
         logger.info("✓ Batch ingestion completed successfully")
-        logger.info("=" * 70)
         
     except Exception as e:
         logger.error(f"Batch ingestion failed: {str(e)}")
-        raise
+        sys.exit(1)
     finally:
         ingestion.cleanup()
 

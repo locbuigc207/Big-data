@@ -1,0 +1,235 @@
+---
+# ConfigMap for data files
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: batch-config
+  namespace: bigdata
+data:
+  HDFS_NAMENODE: "hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000"
+  DATA_PATH: "/data"
+  SPARK_MASTER: "k8s://https://kubernetes.default.svc:443"
+---
+# PVC for CSV data files
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: batch-data-pvc
+  namespace: bigdata
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+# Job to upload CSV files to PVC (run this first)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: upload-csv-files
+  namespace: bigdata
+spec:
+  template:
+    spec:
+      containers:
+      - name: uploader
+        image: busybox:latest
+        command:
+        - sh
+        - -c
+        - |
+          echo "CSV files should be uploaded here"
+          echo "Use: kubectl cp <local-files> bigdata/upload-csv-files-pod:/data"
+          sleep 3600
+        volumeMounts:
+        - name: data-volume
+          mountPath: /data
+      volumes:
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: batch-data-pvc
+      restartPolicy: Never
+---
+# CronJob for daily batch ingestion
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: batch-ingestion-daily
+  namespace: bigdata
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: batch-ingestion
+        spec:
+          serviceAccountName: spark-sa
+          containers:
+          - name: spark-ingestion
+            image: bitnami/spark:3.5.0
+            command:
+            - /bin/bash
+            - -c
+            - |
+              # Install dependencies
+              pip install --quiet --no-cache-dir pyspark==3.5.0
+              
+              # Run ingestion script
+              spark-submit \
+                --master k8s://https://kubernetes.default.svc:443 \
+                --deploy-mode client \
+                --name batch-ingestion \
+                --conf spark.kubernetes.namespace=bigdata \
+                --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark-sa \
+                --conf spark.executor.instances=3 \
+                --conf spark.executor.memory=2g \
+                --conf spark.executor.cores=2 \
+                --conf spark.driver.memory=2g \
+                --conf spark.kubernetes.container.image=bitnami/spark:3.5.0 \
+                --conf spark.hadoop.fs.defaultFS=hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000 \
+                /opt/scripts/batch_ingestion_k8s.py
+            env:
+            - name: HDFS_NAMENODE
+              valueFrom:
+                configMapKeyRef:
+                  name: batch-config
+                  key: HDFS_NAMENODE
+            - name: DATA_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: batch-config
+                  key: DATA_PATH
+            volumeMounts:
+            - name: data-volume
+              mountPath: /data
+              readOnly: true
+            - name: scripts-volume
+              mountPath: /opt/scripts
+            resources:
+              requests:
+                memory: "3Gi"
+                cpu: "1"
+              limits:
+                memory: "6Gi"
+                cpu: "2"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: batch-data-pvc
+          - name: scripts-volume
+            configMap:
+              name: batch-scripts
+          restartPolicy: OnFailure
+          backoffLimit: 3
+---
+# Manual Job (for testing)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: batch-ingestion-manual
+  namespace: bigdata
+spec:
+  template:
+    metadata:
+      labels:
+        app: batch-ingestion
+    spec:
+      serviceAccountName: spark-sa
+      containers:
+      - name: spark-ingestion
+        image: bitnami/spark:3.5.0
+        command:
+        - /bin/bash
+        - -c
+        - |
+          pip install --quiet pyspark==3.5.0
+          
+          spark-submit \
+            --master k8s://https://kubernetes.default.svc:443 \
+            --deploy-mode client \
+            --name batch-ingestion-manual \
+            --conf spark.kubernetes.namespace=bigdata \
+            --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark-sa \
+            --conf spark.executor.instances=2 \
+            --conf spark.executor.memory=2g \
+            --conf spark.driver.memory=2g \
+            --conf spark.kubernetes.container.image=bitnami/spark:3.5.0 \
+            --conf spark.hadoop.fs.defaultFS=hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000 \
+            /opt/scripts/batch_ingestion_k8s.py
+        env:
+        - name: HDFS_NAMENODE
+          value: "hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000"
+        - name: DATA_PATH
+          value: "/data"
+        volumeMounts:
+        - name: data-volume
+          mountPath: /data
+        - name: scripts-volume
+          mountPath: /opt/scripts
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "1"
+      volumes:
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: batch-data-pvc
+      - name: scripts-volume
+        configMap:
+          name: batch-scripts
+      restartPolicy: Never
+  backoffLimit: 2
+---
+# ServiceAccount for Spark
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spark-sa
+  namespace: bigdata
+---
+# ClusterRole for Spark
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: spark-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps"]
+  verbs: ["get", "list", "watch", "create", "delete"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get"]
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: spark-role-binding
+subjects:
+- kind: ServiceAccount
+  name: spark-sa
+  namespace: bigdata
+roleRef:
+  kind: ClusterRole
+  name: spark-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# ConfigMap for Python scripts
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: batch-scripts
+  namespace: bigdata
+data:
+  batch_ingestion_k8s.py: |
+    # Content of batch_ingestion_k8s.py will be here
+    # Use: kubectl create configmap batch-scripts --from-file=batch_ingestion_k8s.py -n bigdata
