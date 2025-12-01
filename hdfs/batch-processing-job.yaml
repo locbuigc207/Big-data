@@ -1,0 +1,205 @@
+---
+# ConfigMap for batch processing script
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: batch-processing-scripts
+  namespace: bigdata
+data:
+  batch_processing_complete.py: |
+    # Content will be created from the Python file
+    # Use: kubectl create configmap batch-processing-scripts --from-file=batch_processing_complete.py -n bigdata
+---
+# CronJob for daily batch processing
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: batch-processing-daily
+  namespace: bigdata
+spec:
+  schedule: "30 2 * * *"  # Daily at 2:30 AM (after ingestion at 2:00 AM)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: batch-processing
+            tier: processing
+        spec:
+          serviceAccountName: spark-sa
+          restartPolicy: OnFailure
+          containers:
+          - name: spark-processor
+            image: bitnami/spark:3.5.0
+            command:
+            - /bin/bash
+            - -c
+            - |
+              echo "=========================================="
+              echo "  Batch Processing Pipeline Starting"
+              echo "=========================================="
+              
+              # Install Python dependencies
+              pip install --quiet --no-cache-dir pyspark==3.5.0
+              
+              # Run batch processing
+              spark-submit \
+                --master k8s://https://kubernetes.default.svc:443 \
+                --deploy-mode client \
+                --name batch-processing-$(date +%Y%m%d) \
+                --conf spark.kubernetes.namespace=bigdata \
+                --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark-sa \
+                --conf spark.kubernetes.container.image=bitnami/spark:3.5.0 \
+                --conf spark.executor.instances=4 \
+                --conf spark.executor.memory=4g \
+                --conf spark.executor.cores=2 \
+                --conf spark.driver.memory=4g \
+                --conf spark.driver.cores=2 \
+                --conf spark.sql.shuffle.partitions=20 \
+                --conf spark.sql.adaptive.enabled=true \
+                --conf spark.sql.adaptive.coalescePartitions.enabled=true \
+                --conf spark.sql.adaptive.skewJoin.enabled=true \
+                --conf spark.hadoop.fs.defaultFS=hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000 \
+                --conf spark.kubernetes.executor.request.cores=1 \
+                --conf spark.kubernetes.executor.limit.cores=2 \
+                --conf spark.kubernetes.driver.request.cores=1 \
+                --conf spark.kubernetes.driver.limit.cores=2 \
+                /opt/scripts/batch_processing_complete.py
+              
+              EXIT_CODE=$?
+              
+              if [ $EXIT_CODE -eq 0 ]; then
+                echo "=========================================="
+                echo "  Batch Processing Completed Successfully"
+                echo "=========================================="
+              else
+                echo "=========================================="
+                echo "  Batch Processing Failed (Exit: $EXIT_CODE)"
+                echo "=========================================="
+              fi
+              
+              exit $EXIT_CODE
+            env:
+            - name: HDFS_NAMENODE
+              value: "hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000"
+            - name: PYSPARK_PYTHON
+              value: "/usr/bin/python3"
+            - name: PYSPARK_DRIVER_PYTHON
+              value: "/usr/bin/python3"
+            volumeMounts:
+            - name: scripts-volume
+              mountPath: /opt/scripts
+            resources:
+              requests:
+                memory: "5Gi"
+                cpu: "2"
+              limits:
+                memory: "8Gi"
+                cpu: "4"
+          volumes:
+          - name: scripts-volume
+            configMap:
+              name: batch-processing-scripts
+          backoffLimit: 2
+---
+# Manual Job for testing
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: batch-processing-manual
+  namespace: bigdata
+spec:
+  template:
+    metadata:
+      labels:
+        app: batch-processing
+        run: manual
+    spec:
+      serviceAccountName: spark-sa
+      restartPolicy: Never
+      containers:
+      - name: spark-processor
+        image: bitnami/spark:3.5.0
+        command:
+        - /bin/bash
+        - -c
+        - |
+          echo "=========================================="
+          echo "  Manual Batch Processing"
+          echo "=========================================="
+          
+          pip install --quiet pyspark==3.5.0
+          
+          spark-submit \
+            --master k8s://https://kubernetes.default.svc:443 \
+            --deploy-mode client \
+            --name batch-processing-manual-$(date +%s) \
+            --conf spark.kubernetes.namespace=bigdata \
+            --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark-sa \
+            --conf spark.kubernetes.container.image=bitnami/spark:3.5.0 \
+            --conf spark.executor.instances=3 \
+            --conf spark.executor.memory=3g \
+            --conf spark.executor.cores=2 \
+            --conf spark.driver.memory=3g \
+            --conf spark.sql.shuffle.partitions=15 \
+            --conf spark.hadoop.fs.defaultFS=hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000 \
+            /opt/scripts/batch_processing_complete.py
+        env:
+        - name: HDFS_NAMENODE
+          value: "hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000"
+        volumeMounts:
+        - name: scripts-volume
+          mountPath: /opt/scripts
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "1500m"
+          limits:
+            memory: "6Gi"
+            cpu: "3"
+      volumes:
+      - name: scripts-volume
+        configMap:
+          name: batch-processing-scripts
+  backoffLimit: 1
+---
+# Job to verify processed data
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: verify-batch-processing
+  namespace: bigdata
+spec:
+  template:
+    spec:
+      containers:
+      - name: verifier
+        image: bitnami/spark:3.5.0
+        command:
+        - /bin/bash
+        - -c
+        - |
+          echo "Verifying batch processing results..."
+          
+          # Check if HDFS directories exist
+          hdfs dfs -test -d hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000/views/batch
+          
+          if [ $? -eq 0 ]; then
+            echo "✓ Batch views directory exists"
+            
+            # List all views
+            echo ""
+            echo "Available batch views:"
+            hdfs dfs -ls hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000/views/batch/$(date +%Y-%m-%d)/
+            
+            echo ""
+            echo "Verification complete!"
+          else
+            echo "✗ Batch views directory not found"
+            exit 1
+          fi
+      restartPolicy: Never
+  backoffLimit: 1
