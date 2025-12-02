@@ -1,0 +1,432 @@
+---
+# Namespace (nếu chưa có)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bigdata
+---
+# ConfigMap for ML scripts
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ml-pipeline-scripts
+  namespace: bigdata
+data:
+  # Placeholder - scripts will be loaded separately
+  README.md: |
+    ML Pipeline Scripts
+    
+    To load scripts into this ConfigMap:
+    kubectl create configmap ml-pipeline-scripts \
+      --from-file=ml_feature_engineering.py \
+      --from-file=ml_gpa_predictor.py \
+      --from-file=ml_dropout_classifier.py \
+      -n bigdata \
+      --dry-run=client -o yaml | kubectl apply -f -
+---
+# ServiceAccount for Spark ML jobs
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spark-ml-sa
+  namespace: bigdata
+---
+# Role for Spark ML
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spark-ml-role
+  namespace: bigdata
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps", "secrets"]
+  verbs: ["get", "list", "watch", "create", "delete", "update", "patch"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets"]
+  verbs: ["get", "list", "watch"]
+---
+# RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spark-ml-role-binding
+  namespace: bigdata
+subjects:
+- kind: ServiceAccount
+  name: spark-ml-sa
+  namespace: bigdata
+roleRef:
+  kind: Role
+  name: spark-ml-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# Job 1: Feature Engineering
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ml-feature-engineering
+  namespace: bigdata
+  labels:
+    app: ml-pipeline
+    component: feature-engineering
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: ml-pipeline
+        component: feature-engineering
+    spec:
+      serviceAccountName: spark-ml-sa
+      restartPolicy: Never
+      containers:
+      - name: spark-feature-engineer
+        image: bitnami/spark:3.5.0
+        command:
+        - /bin/bash
+        - -c
+        - |
+          echo "=========================================="
+          echo "  ML Feature Engineering Starting"
+          echo "=========================================="
+          
+          # Install dependencies
+          pip install --quiet --no-cache-dir pyspark==3.5.0
+          
+          # Run feature engineering
+          spark-submit \
+            --master k8s://https://kubernetes.default.svc:443 \
+            --deploy-mode client \
+            --name ml-feature-engineering-$(date +%Y%m%d) \
+            --conf spark.kubernetes.namespace=bigdata \
+            --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark-ml-sa \
+            --conf spark.kubernetes.container.image=bitnami/spark:3.5.0 \
+            --conf spark.executor.instances=3 \
+            --conf spark.executor.memory=4g \
+            --conf spark.executor.cores=2 \
+            --conf spark.driver.memory=4g \
+            --conf spark.driver.cores=2 \
+            --conf spark.sql.shuffle.partitions=20 \
+            --conf spark.hadoop.fs.defaultFS=hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000 \
+            /opt/scripts/ml_feature_engineering.py
+          
+          EXIT_CODE=$?
+          
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "=========================================="
+            echo "  Feature Engineering Completed"
+            echo "=========================================="
+          else
+            echo "=========================================="
+            echo "  Feature Engineering Failed"
+            echo "=========================================="
+          fi
+          
+          exit $EXIT_CODE
+        env:
+        - name: HDFS_NAMENODE
+          value: "hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000"
+        - name: PYSPARK_PYTHON
+          value: "/usr/bin/python3"
+        - name: PYSPARK_DRIVER_PYTHON
+          value: "/usr/bin/python3"
+        volumeMounts:
+        - name: scripts-volume
+          mountPath: /opt/scripts
+        resources:
+          requests:
+            memory: "5Gi"
+            cpu: "2"
+          limits:
+            memory: "8Gi"
+            cpu: "4"
+      volumes:
+      - name: scripts-volume
+        configMap:
+          name: ml-pipeline-scripts
+---
+# Job 2: GPA Prediction Training
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ml-gpa-predictor-training
+  namespace: bigdata
+  labels:
+    app: ml-pipeline
+    component: gpa-training
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: ml-pipeline
+        component: gpa-training
+    spec:
+      serviceAccountName: spark-ml-sa
+      restartPolicy: Never
+      containers:
+      - name: spark-gpa-trainer
+        image: bitnami/spark:3.5.0
+        command:
+        - /bin/bash
+        - -c
+        - |
+          echo "=========================================="
+          echo "  GPA Prediction Model Training Starting"
+          echo "=========================================="
+          
+          pip install --quiet --no-cache-dir pyspark==3.5.0
+          
+          spark-submit \
+            --master k8s://https://kubernetes.default.svc:443 \
+            --deploy-mode client \
+            --name ml-gpa-training-$(date +%Y%m%d) \
+            --conf spark.kubernetes.namespace=bigdata \
+            --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark-ml-sa \
+            --conf spark.kubernetes.container.image=bitnami/spark:3.5.0 \
+            --conf spark.executor.instances=4 \
+            --conf spark.executor.memory=6g \
+            --conf spark.executor.cores=2 \
+            --conf spark.driver.memory=6g \
+            --conf spark.driver.cores=2 \
+            --conf spark.sql.shuffle.partitions=20 \
+            --conf spark.hadoop.fs.defaultFS=hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000 \
+            --conf spark.sql.adaptive.enabled=true \
+            /opt/scripts/ml_gpa_predictor.py
+          
+          EXIT_CODE=$?
+          
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "=========================================="
+            echo "  GPA Model Training Completed"
+            echo "=========================================="
+          else
+            echo "=========================================="
+            echo "  GPA Model Training Failed"
+            echo "=========================================="
+          fi
+          
+          exit $EXIT_CODE
+        env:
+        - name: HDFS_NAMENODE
+          value: "hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000"
+        volumeMounts:
+        - name: scripts-volume
+          mountPath: /opt/scripts
+        resources:
+          requests:
+            memory: "7Gi"
+            cpu: "2500m"
+          limits:
+            memory: "10Gi"
+            cpu: "4"
+      volumes:
+      - name: scripts-volume
+        configMap:
+          name: ml-pipeline-scripts
+---
+# Job 3: Dropout Risk Classification Training
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ml-dropout-classifier-training
+  namespace: bigdata
+  labels:
+    app: ml-pipeline
+    component: dropout-training
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: ml-pipeline
+        component: dropout-training
+    spec:
+      serviceAccountName: spark-ml-sa
+      restartPolicy: Never
+      containers:
+      - name: spark-dropout-trainer
+        image: bitnami/spark:3.5.0
+        command:
+        - /bin/bash
+        - -c
+        - |
+          echo "=========================================="
+          echo "  Dropout Risk Model Training Starting"
+          echo "=========================================="
+          
+          pip install --quiet --no-cache-dir pyspark==3.5.0
+          
+          spark-submit \
+            --master k8s://https://kubernetes.default.svc:443 \
+            --deploy-mode client \
+            --name ml-dropout-training-$(date +%Y%m%d) \
+            --conf spark.kubernetes.namespace=bigdata \
+            --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark-ml-sa \
+            --conf spark.kubernetes.container.image=bitnami/spark:3.5.0 \
+            --conf spark.executor.instances=4 \
+            --conf spark.executor.memory=6g \
+            --conf spark.executor.cores=2 \
+            --conf spark.driver.memory=6g \
+            --conf spark.driver.cores=2 \
+            --conf spark.sql.shuffle.partitions=20 \
+            --conf spark.hadoop.fs.defaultFS=hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000 \
+            --conf spark.sql.adaptive.enabled=true \
+            /opt/scripts/ml_dropout_classifier.py
+          
+          EXIT_CODE=$?
+          
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "=========================================="
+            echo "  Dropout Model Training Completed"
+            echo "=========================================="
+          else
+            echo "=========================================="
+            echo "  Dropout Model Training Failed"
+            echo "=========================================="
+          fi
+          
+          exit $EXIT_CODE
+        env:
+        - name: HDFS_NAMENODE
+          value: "hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000"
+        volumeMounts:
+        - name: scripts-volume
+          mountPath: /opt/scripts
+        resources:
+          requests:
+            memory: "7Gi"
+            cpu: "2500m"
+          limits:
+            memory: "10Gi"
+            cpu: "4"
+      volumes:
+      - name: scripts-volume
+        configMap:
+          name: ml-pipeline-scripts
+---
+# CronJob: Weekly Model Retraining
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ml-weekly-retraining
+  namespace: bigdata
+  labels:
+    app: ml-pipeline
+    component: scheduled-training
+spec:
+  schedule: "0 2 * * 0"  # Every Sunday at 2 AM
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: ml-pipeline
+            component: scheduled-training
+        spec:
+          serviceAccountName: spark-ml-sa
+          restartPolicy: OnFailure
+          containers:
+          - name: ml-retraining-orchestrator
+            image: bitnami/spark:3.5.0
+            command:
+            - /bin/bash
+            - -c
+            - |
+              echo "=========================================="
+              echo "  Weekly ML Retraining Pipeline"
+              echo "  $(date)"
+              echo "=========================================="
+              
+              pip install --quiet pyspark==3.5.0
+              
+              # Step 1: Feature Engineering
+              echo ""
+              echo "[1/3] Running Feature Engineering..."
+              spark-submit \
+                --master k8s://https://kubernetes.default.svc:443 \
+                --deploy-mode client \
+                --name ml-features-weekly \
+                --conf spark.kubernetes.namespace=bigdata \
+                --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark-ml-sa \
+                --conf spark.kubernetes.container.image=bitnami/spark:3.5.0 \
+                --conf spark.executor.instances=3 \
+                --conf spark.executor.memory=4g \
+                --conf spark.driver.memory=4g \
+                --conf spark.hadoop.fs.defaultFS=hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000 \
+                /opt/scripts/ml_feature_engineering.py
+              
+              if [ $? -ne 0 ]; then
+                echo "Feature engineering failed!"
+                exit 1
+              fi
+              
+              # Step 2: Train GPA Predictor
+              echo ""
+              echo "[2/3] Training GPA Predictor..."
+              spark-submit \
+                --master k8s://https://kubernetes.default.svc:443 \
+                --deploy-mode client \
+                --name ml-gpa-weekly \
+                --conf spark.kubernetes.namespace=bigdata \
+                --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark-ml-sa \
+                --conf spark.kubernetes.container.image=bitnami/spark:3.5.0 \
+                --conf spark.executor.instances=4 \
+                --conf spark.executor.memory=6g \
+                --conf spark.driver.memory=6g \
+                --conf spark.hadoop.fs.defaultFS=hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000 \
+                /opt/scripts/ml_gpa_predictor.py
+              
+              if [ $? -ne 0 ]; then
+                echo "GPA training failed!"
+                exit 1
+              fi
+              
+              # Step 3: Train Dropout Classifier
+              echo ""
+              echo "[3/3] Training Dropout Classifier..."
+              spark-submit \
+                --master k8s://https://kubernetes.default.svc:443 \
+                --deploy-mode client \
+                --name ml-dropout-weekly \
+                --conf spark.kubernetes.namespace=bigdata \
+                --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark-ml-sa \
+                --conf spark.kubernetes.container.image=bitnami/spark:3.5.0 \
+                --conf spark.executor.instances=4 \
+                --conf spark.executor.memory=6g \
+                --conf spark.driver.memory=6g \
+                --conf spark.hadoop.fs.defaultFS=hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000 \
+                /opt/scripts/ml_dropout_classifier.py
+              
+              if [ $? -ne 0 ]; then
+                echo "Dropout training failed!"
+                exit 1
+              fi
+              
+              echo ""
+              echo "=========================================="
+              echo "  Weekly Retraining Completed Successfully"
+              echo "=========================================="
+            env:
+            - name: HDFS_NAMENODE
+              value: "hdfs://hdfs-namenode.bigdata.svc.cluster.local:9000"
+            volumeMounts:
+            - name: scripts-volume
+              mountPath: /opt/scripts
+            resources:
+              requests:
+                memory: "8Gi"
+                cpu: "3"
+              limits:
+                memory: "12Gi"
+                cpu: "5"
+          volumes:
+          - name: scripts-volume
+            configMap:
+              name: ml-pipeline-scripts
