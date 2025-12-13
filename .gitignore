@@ -1,8 +1,111 @@
-data/
-generate_fake_data/
-__pycache__/
-*.parquet
+# Operating systems
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs / editors
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+*.iml
+.classpath
+.project
+.settings/
+
+# Build outputs
+target/
+build/
+out/
+dist/
+bin/
+tmp/
+temp/
+
+# Java / Scala
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+lib/*.jar
+
+# SBT / Maven / Gradle
+.project
+target/
 *.log
-*.csv
-*.json
+.gradle/
+.mvn/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+release.properties
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-wheel-metadata/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+.pnpm-debug.log
+
+# Logs and runtime files
+logs/
+*.log
+*.out
+*.pid
+
+# Data, cache, and large artifacts (ignore generated data)
+data/
+datasets/
+*.parquet
+*.avro
+*.orc
+*.snappy
+*.lz4
+*.zip
+*.tar.gz
+
+# Spark / Hadoop / YARN temporary files
+spark-warehouse/
+local-*
+yarn-*
+hsperfdata*
+hs_err_pid*
+application_*.log
+
+# Docker / environment
 .env
+docker-compose.override.yml
+.Dockerfile.swp
+
+# Notebooks and checkpoints
+*.nb.html
+
+# Misc
+coverage.xml
+coverage/
+coverage.*
+reports/
+*.key
+*.crt
+secrets/
+
+# Ignore specific directories and files
+hdfs_data
+local_data_dump

@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<workflow-app xmlns="uri:oozie:workflow:0.5" name="batch-layer-workflow">
+    
+    <start to="fork-batch-jobs"/>
+    
+    <!-- Fork to run all batch jobs in parallel -->
+    <fork name="fork-batch-jobs">
+        <path start="auth-batch-job"/>
+        <path start="assessment-batch-job"/>
+        <path start="video-batch-job"/>
+        <path start="course-batch-job"/>
+        <path start="profile-notification-batch-job"/>
+    </fork>
+    
+    <!-- Auth Batch Job -->
+    <action name="auth-batch-job">
+        <spark xmlns="uri:oozie:spark-action:0.2">
+            <job-tracker>${jobTracker}</job-tracker>
+            <name-node>${nameNode}</name-node>
+            <configuration>
+                <property>
+                    <name>mapred.job.queue.name</name>
+                    <value>${queueName}</value>
+                </property>
+            </configuration>
+            <master>${sparkMaster}</master>
+            <mode>${sparkMode}</mode>
+            <name>Auth Batch Job</name>
+            <class>auth_batch_job</class>
+            <jar>${workflowRoot}/jobs/auth_batch_job.py</jar>
+            <spark-opts>--executor-memory ${executorMemory} --executor-cores ${executorCores} --num-executors ${numExecutors}</spark-opts>
+            <arg>${inputPath}</arg>
+            <arg>${outputPath}</arg>
+        </spark>
+        <ok to="join-batch-jobs"/>
+        <error to="fail"/>
+    </action>
+    
+    <!-- Assessment Batch Job -->
+    <action name="assessment-batch-job">
+        <spark xmlns="uri:oozie:spark-action:0.2">
+            <job-tracker>${jobTracker}</job-tracker>
+            <name-node>${nameNode}</name-node>
+            <configuration>
+                <property>
+                    <name>mapred.job.queue.name</name>
+                    <value>${queueName}</value>
+                </property>
+            </configuration>
+            <master>${sparkMaster}</master>
+            <mode>${sparkMode}</mode>
+            <name>Assessment Batch Job</name>
+            <class>assessment_batch_job</class>
+            <jar>${workflowRoot}/jobs/assessment_batch_job.py</jar>
+            <spark-opts>--executor-memory ${executorMemory} --executor-cores ${executorCores} --num-executors ${numExecutors}</spark-opts>
+            <arg>${inputPath}</arg>
+            <arg>${outputPath}</arg>
+        </spark>
+        <ok to="join-batch-jobs"/>
+        <error to="fail"/>
+    </action>
+    
+    <!-- Video Batch Job -->
+    <action name="video-batch-job">
+        <spark xmlns="uri:oozie:spark-action:0.2">
+            <job-tracker>${jobTracker}</job-tracker>
+            <name-node>${nameNode}</name-node>
+            <configuration>
+                <property>
+                    <name>mapred.job.queue.name</name>
+                    <value>${queueName}</value>
+                </property>
+            </configuration>
+            <master>${sparkMaster}</master>
+            <mode>${sparkMode}</mode>
+            <name>Video Batch Job</name>
+            <class>video_batch_job</class>
+            <jar>${workflowRoot}/jobs/video_batch_job.py</jar>
+            <spark-opts>--executor-memory ${executorMemory} --executor-cores ${executorCores} --num-executors ${numExecutors}</spark-opts>
+            <arg>${inputPath}</arg>
+            <arg>${outputPath}</arg>
+        </spark>
+        <ok to="join-batch-jobs"/>
+        <error to="fail"/>
+    </action>
+    
+    <!-- Course Batch Job -->
+    <action name="course-batch-job">
+        <spark xmlns="uri:oozie:spark-action:0.2">
+            <job-tracker>${jobTracker}</job-tracker>
+            <name-node>${nameNode}</name-node>
+            <configuration>
+                <property>
+                    <name>mapred.job.queue.name</name>
+                    <value>${queueName}</value>
+                </property>
+            </configuration>
+            <master>${sparkMaster}</master>
+            <mode>${sparkMode}</mode>
+            <name>Course Batch Job</name>
+            <class>course_batch_job</class>
+            <jar>${workflowRoot}/jobs/course_batch_job.py</jar>
+            <spark-opts>--executor-memory ${executorMemory} --executor-cores ${executorCores} --num-executors ${numExecutors}</spark-opts>
+            <arg>${inputPath}</arg>
+            <arg>${outputPath}</arg>
+        </spark>
+        <ok to="join-batch-jobs"/>
+        <error to="fail"/>
+    </action>
+    
+    <!-- Profile & Notification Batch Job -->
+    <action name="profile-notification-batch-job">
+        <spark xmlns="uri:oozie:spark-action:0.2">
+            <job-tracker>${jobTracker}</job-tracker>
+            <name-node>${nameNode}</name-node>
+            <configuration>
+                <property>
+                    <name>mapred.job.queue.name</name>
+                    <value>${queueName}</value>
+                </property>
+            </configuration>
+            <master>${sparkMaster}</master>
+            <mode>${sparkMode}</mode>
+            <name>Profile & Notification Batch Job</name>
+            <class>profile_notification_batch_job</class>
+            <jar>${workflowRoot}/jobs/profile_notification_batch_job.py</jar>
+            <spark-opts>--executor-memory ${executorMemory} --executor-cores ${executorCores} --num-executors ${numExecutors}</spark-opts>
+            <arg>${inputPath}</arg>
+            <arg>${outputPath}</arg>
+        </spark>
+        <ok to="join-batch-jobs"/>
+        <error to="fail"/>
+    </action>
+    
+    <!-- Join all batch jobs -->
+    <join name="join-batch-jobs" to="end"/>
+    
+    <!-- End workflow -->
+    <end name="end"/>
+    
+    <!-- Kill on error -->
+    <kill name="fail">
+        <message>Batch layer workflow failed, error message[${wf:errorMessage(wf:lastErrorNode())}]</message>
+    </kill>
+    
+</workflow-app>

@@ -1,0 +1,21 @@
+# Dockerfile for Ingestion Layer
+FROM apache/spark-py:v3.5.0
+
+USER root
+
+# Install required Python packages
+RUN pip install --no-cache-dir \
+    kafka-python \
+    pyspark==3.5.0
+
+# Copy ingestion script
+COPY minio_ingest.py /opt/spark/work-dir/
+
+# Set working directory
+WORKDIR /opt/spark/work-dir
+
+# Update script to use environment variables
+RUN sed -i 's/localhost:9092/${KAFKA_BOOTSTRAP_SERVERS}/g' minio_ingest.py
+
+# Run ingestion script
+CMD ["python", "minio_ingest.py"]

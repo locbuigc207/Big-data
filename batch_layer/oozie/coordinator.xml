@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<coordinator-app name="batch-layer-coordinator" 
+                 frequency="${coord:hours(24)}" 
+                 start="${startTime}" 
+                 end="${endTime}" 
+                 timezone="UTC"
+                 xmlns="uri:oozie:coordinator:0.4">
+    
+    <!-- 
+        This coordinator schedules the batch layer workflow to run daily at midnight UTC
+        It processes the previous day's data that was ingested to MinIO
+    -->
+    
+    <action>
+        <workflow>
+            <app-path>${workflowAppPath}</app-path>
+            <configuration>
+                <!-- Workflow properties -->
+                <property>
+                    <name>jobTracker</name>
+                    <value>${jobTracker}</value>
+                </property>
+                <property>
+                    <name>nameNode</name>
+                    <value>${nameNode}</value>
+                </property>
+                <property>
+                    <name>queueName</name>
+                    <value>${queueName}</value>
+                </property>
+                
+                <!-- Spark properties -->
+                <property>
+                    <name>sparkMaster</name>
+                    <value>${sparkMaster}</value>
+                </property>
+                <property>
+                    <name>sparkMode</name>
+                    <value>${sparkMode}</value>
+                </property>
+                <property>
+                    <name>executorMemory</name>
+                    <value>${executorMemory}</value>
+                </property>
+                <property>
+                    <name>executorCores</name>
+                    <value>${executorCores}</value>
+                </property>
+                <property>
+                    <name>numExecutors</name>
+                    <value>${numExecutors}</value>
+                </property>
+                
+                <!-- Data paths - process yesterday's data -->
+                <property>
+                    <name>inputPath</name>
+                    <value>${inputBasePath}</value>
+                </property>
+                <property>
+                    <name>outputPath</name>
+                    <value>${outputBasePath}</value>
+                </property>
+                
+                <!-- Workflow root -->
+                <property>
+                    <name>workflowRoot</name>
+                    <value>${workflowRoot}</value>
+                </property>
+            </configuration>
+        </workflow>
+    </action>
+    
+</coordinator-app>

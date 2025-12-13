@@ -1,0 +1,94 @@
+# Kafka Topics Configuration for Student Learning Analytics
+# 6 topics for different event categories
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: auth-topic
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  partitions: 3
+  replicas: 3
+  config:
+    retention.ms: 63072000000  # 2 years
+    compression.type: snappy
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: assessment-topic
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  partitions: 5
+  replicas: 3
+  config:
+    retention.ms: 157680000000  # 5 years
+    compression.type: snappy
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: video-topic
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  partitions: 5
+  replicas: 3
+  config:
+    retention.ms: 63072000000  # 2 years
+    compression.type: snappy
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: course-topic
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  partitions: 3
+  replicas: 3
+  config:
+    retention.ms: 94608000000  # 3 years
+    compression.type: snappy
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: profile-topic
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  partitions: 2
+  replicas: 3
+  config:
+    retention.ms: -1  # Infinite
+    compression.type: snappy
+    cleanup.policy: compact  # Keep only latest value per key
+    segment.ms: 3600000  # 1 hour
+    min.compaction.lag.ms: 0
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: notification-topic
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  partitions: 3
+  replicas: 3
+  config:
+    retention.ms: 2592000000  # 30 days
+    compression.type: snappy
+    cleanup.policy: delete

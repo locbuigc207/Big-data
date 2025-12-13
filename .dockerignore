@@ -1,0 +1,7 @@
+hdfs_data
+local_data_dump
+__pycache__
+*.pyc
+.git
+.vscode
+.idea
