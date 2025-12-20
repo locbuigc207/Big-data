@@ -33,7 +33,7 @@ Write-Host ""
 
 # Step 4: Create storage
 Write-Host "[4/10] Setting up storage..." -ForegroundColor Yellow
-minikube ssh "sudo mkdir -p /mnt/kafka-data/0 /mnt/kafka-data/1 /mnt/kafka-data/2"
+minikube ssh "sudo mkdir -p /mnt/kafka-data/0 /mnt/kafka-data/1 /mnt/kafka-data/2 && sudo chmod -R 777 /mnt/kafka-data"
 kubectl apply -f kafka/storage-class.yaml -n kafka
 kubectl apply -f kafka/persistent-volumn-minikube.yaml -n kafka
 Write-Host "✅ Storage configured" -ForegroundColor Green
@@ -42,7 +42,7 @@ Write-Host ""
 # Step 5: Deploy Kafka
 Write-Host "[5/10] Deploying Kafka cluster (this takes 3-5 minutes)..." -ForegroundColor Yellow
 kubectl apply -f kafka/deployment.yaml -n kafka
-kubectl wait kafka/kafka-cluster --for=condition=Ready --timeout=600s -n kafka
+kubectl wait kafka/kafka-cluster --for=condition=Ready --timeout=1200s -n kafka
 Write-Host "✅ Kafka cluster ready" -ForegroundColor Green
 Write-Host ""
 
@@ -75,8 +75,39 @@ Remove-Job -Job $minioJob
 Write-Host "✅ MinIO bucket created" -ForegroundColor Green
 Write-Host ""
 
-# Step 9: Display status
-Write-Host "[9/10] Checking deployment status..." -ForegroundColor Yellow
+# Step 9: Build Docker Images
+Write-Host "[9/12] Building Docker images inside Minikube..." -ForegroundColor Yellow
+minikube docker-env | Invoke-Expression
+
+Write-Host "   Building Speed Layer..."
+docker build -t speed-layer:latest -f speed_layer/Dockerfile .
+Write-Host "   Building Serving Layer..."
+docker build -t serving-layer:latest -f serving_layer/Dockerfile .
+Write-Host "   Building Batch Layer..."
+docker build -t batch-layer:latest -f batch_layer/Dockerfile .
+Write-Host "✅ Images built" -ForegroundColor Green
+Write-Host ""
+
+# Step 10: Deploy Speed Layer
+Write-Host "[10/12] Deploying Speed Layer..." -ForegroundColor Yellow
+kubectl apply -f speed_layer/deployment.yaml -n default
+Write-Host "✅ Speed Layer deployed" -ForegroundColor Green
+Write-Host ""
+
+# Step 11: Deploy Serving Layer
+Write-Host "[11/12] Deploying Serving Layer..." -ForegroundColor Yellow
+kubectl apply -f serving_layer/deployment.yaml -n default
+Write-Host "✅ Serving Layer deployed" -ForegroundColor Green
+Write-Host ""
+
+# Step 12: Deploy Batch Layer (Job)
+Write-Host "[12/12] Deploying Batch Layer Job..." -ForegroundColor Yellow
+kubectl apply -f batch_layer/deployment.yaml -n default
+Write-Host "✅ Batch Layer Job submitted" -ForegroundColor Green
+Write-Host ""
+
+# Step 13: Display status
+Write-Host "[13/13] Checking deployment status..." -ForegroundColor Yellow
 Write-Host ""
 Write-Host "Kafka Pods:" -ForegroundColor Cyan
 kubectl get pods -n kafka -l strimzi.io/cluster=kafka-cluster
@@ -84,37 +115,28 @@ Write-Host ""
 Write-Host "MinIO Pods:" -ForegroundColor Cyan
 kubectl get pods -n minio
 Write-Host ""
+Write-Host "Application Pods (Default Namespace):" -ForegroundColor Cyan
+kubectl get pods -n default
+Write-Host ""
 Write-Host "Kafka Topics:" -ForegroundColor Cyan
 kubectl get kafkatopics -n kafka
 Write-Host ""
 
-# Step 10: Start port forwarding
+# Step 14: Start port forwarding
 Write-Host "[10/10] Setting up port forwarding..." -ForegroundColor Yellow
 Write-Host ""
 Write-Host "================================" -ForegroundColor Cyan
 Write-Host "NEXT STEPS:" -ForegroundColor Cyan
 Write-Host "================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "1. Open 3 NEW PowerShell terminals and run:" -ForegroundColor Yellow
-Write-Host "   Terminal 1: kubectl port-forward service/kafka-cluster-kafka-bootstrap 9092:9092 -n kafka" -ForegroundColor White
-Write-Host "   Terminal 2: kubectl port-forward service/minio 9000:9000 -n minio" -ForegroundColor White
-Write-Host "   Terminal 3: kubectl port-forward service/minio 9001:9001 -n minio" -ForegroundColor White
+Write-Host "1. Open 2 NEW PowerShell terminals and run:" -ForegroundColor Yellow
+Write-Host "   Terminal 1: kubectl port-forward service/minio 9000:9000 -n minio" -ForegroundColor White
+Write-Host "   Terminal 2: kubectl port-forward service/minio 9001:9001 -n minio" -ForegroundColor White
 Write-Host ""
 Write-Host "2. Wait 30 seconds for port-forwards to be ready" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "3. Run the producer:" -ForegroundColor Yellow
-Write-Host "   python producer.py" -ForegroundColor White
-Write-Host ""
-Write-Host "4. Run the ingestion layer:" -ForegroundColor Yellow
-Write-Host "   python minio_ingest_k8s.py" -ForegroundColor White
-Write-Host ""
-Write-Host "5. Access MinIO Console:" -ForegroundColor Yellow
-Write-Host "   http://localhost:9001" -ForegroundColor White
-Write-Host "   Username: minioadmin" -ForegroundColor White
-Write-Host "   Password: minioadmin" -ForegroundColor White
-Write-Host ""
-Write-Host "6. Verify data ingestion:" -ForegroundColor Yellow
-Write-Host "   mc ls --recursive minikube/bucket-0/master_dataset/" -ForegroundColor White
+Write-Host "3. Run verification:" -ForegroundColor Yellow
+Write-Host "   ./deployment/verify_minikube.sh (Use Bash or Git Bash)" -ForegroundColor White
 Write-Host ""
 Write-Host "================================" -ForegroundColor Cyan
 Write-Host "DEPLOYMENT COMPLETE! ✅" -ForegroundColor Green

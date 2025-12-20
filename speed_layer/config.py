@@ -50,9 +50,9 @@ speed_config = {
         "executor_cores": 2,
         "num_executors": 2,
         "driver_memory": "1g",
-        "shuffle_partitions": 50,
-        "default_parallelism": 50,
-        "streaming_checkpoint_interval": "10 seconds"
+        "shuffle_partitions": 20,
+        "default_parallelism": 20,
+        "streaming_checkpoint_interval": "30 seconds"
     },
     
     # Output Configuration
@@ -60,7 +60,7 @@ speed_config = {
         "format": "parquet",
         "mode": "append",  # For streaming, use append
         "compression": "snappy",
-        "trigger_interval": "30 seconds",  # How often to write output
+        "trigger_interval": "1 minute",  # How often to write output
         "output_mode": "append"  # append, complete, or update
     },
     
@@ -167,5 +167,11 @@ def get_spark_config():
         "spark.hadoop.fs.s3a.access.key": speed_config["minio"]["access_key"],
         "spark.hadoop.fs.s3a.secret.key": speed_config["minio"]["secret_key"],
         "spark.hadoop.fs.s3a.path.style.access": "true",
-        "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem"
+        "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem",
+        "spark.hadoop.fs.s3a.connection.maximum": "20",
+        "spark.hadoop.fs.s3a.threads.max": "15",
+        "spark.hadoop.fs.s3a.connection.establish.timeout": "5000",
+        "spark.hadoop.fs.s3a.attempts.maximum": "3",
+        "spark.hadoop.fs.s3a.multipart.size": "104857600"
     }
+

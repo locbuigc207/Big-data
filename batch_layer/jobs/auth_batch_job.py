@@ -7,23 +7,14 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, count, countDistinct, date_format, hour, 
     min as spark_min, max as spark_max, avg, 
-    window, unix_timestamp, when, sum as spark_sum
+    window, unix_timestamp, when, sum as spark_sum,
+    from_json
 )
 from pyspark.sql.types import StructType, StructField, StringType, TimestampType
 import sys
 from datetime import datetime
 
-def create_spark_session():
-    """Initialize Spark Session with MinIO configuration"""
-    return SparkSession.builder \
-        .appName("Auth_Batch_Job") \
-        .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \
-        .config("spark.hadoop.fs.s3a.access.key", "minioadmin") \
-        .config("spark.hadoop.fs.s3a.secret.key", "minioadmin") \
-        .config("spark.hadoop.fs.s3a.path.style.access", "true") \
-        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
-        .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
-        .getOrCreate()
+from spark_config import create_spark_session, read_topic_data
 
 def get_auth_schema():
     """Define schema for AUTH events"""
@@ -115,16 +106,20 @@ def compute_registration_analytics(df):
 
 def main(input_path, output_path):
     """Main batch job execution"""
-    spark = create_spark_session()
+    spark = create_spark_session("Auth_Batch_Job")
     spark.sparkContext.setLogLevel("WARN")
     
     print(f"[AUTH BATCH] Reading auth events from: {input_path}")
     
     # Read raw auth events from MinIO (partitioned by topic=auth_topic)
-    df_raw = spark.read.parquet(f"{input_path}/topic=auth_topic")
+    df_raw = read_topic_data(spark, input_path, "auth_topic")
+    
+    # Parse JSON body
+    json_schema = get_auth_schema()
+    df_parsed = df_raw.withColumn("data", from_json(col("value").cast("string"), json_schema)).select("data.*")
     
     # Parse timestamp
-    df = df_raw.withColumn("timestamp_parsed", col("timestamp").cast(TimestampType()))
+    df = df_parsed.withColumn("timestamp_parsed", col("timestamp").cast(TimestampType()))
     
     print(f"[AUTH BATCH] Total auth events: {df.count()}")
     

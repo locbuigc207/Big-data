@@ -123,12 +123,10 @@ BTLbigdata-group30/
 
 ## 🎯 Implementation Status
 
-| Layer | Status | Components | Batch Views |
-|-------|--------|------------|-------------|
 | **Ingestion** | ✅ Complete | 4 scripts, 6 Kafka topics | - |
 | **Batch Layer** | ✅ Complete | 5 PySpark jobs, Oozie orchestration | 37 views |
-| **Speed Layer** | ⏳ Planned | Real-time stream processing | TBD |
-| **Serving Layer** | ⏳ Planned | Query API, view merger | TBD |
+| **Speed Layer** | ✅ Complete | Spark Streaming (3 key views), K8s Deployment | 3 views |
+| **Serving Layer** | ✅ Complete | FastAPI, Streamlit Dashboard, K8s Deployment | - |
 
 ---
 

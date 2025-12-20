@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: batch-layer-job
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+      - name: batch-layer
+        image: batch-layer:latest
+        imagePullPolicy: Never
+        command: ["python", "batch_layer/run_batch_jobs.py", "s3a://bucket-0/master_dataset", "s3a://bucket-0/batch_views"]
+        env:
+        - name: MINIO_ENDPOINT
+          value: "http://minio.minio.svc:9000"
+        - name: MINIO_ACCESS_KEY
+          value: "minioadmin"
+        - name: MINIO_SECRET_KEY
+          value: "minioadmin"
+        resources:
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+      restartPolicy: Never
+  backoffLimit: 4

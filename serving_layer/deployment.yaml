@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: serving-layer
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: serving-layer
+  template:
+    metadata:
+      labels:
+        app: serving-layer
+    spec:
+      containers:
+      - name: serving-api
+        image: serving-layer:latest
+        imagePullPolicy: Never
+        command: ["uvicorn", "serving_layer.serving_layer:app", "--host", "0.0.0.0", "--port", "8000"]
+        ports:
+        - containerPort: 8000
+        env:
+        - name: PYTHONPATH
+          value: "/app"
+        - name: MINIO_ENDPOINT
+          value: "http://minio.minio.svc:9000"
+        - name: MINIO_ACCESS_KEY
+          value: "minioadmin"
+        - name: MINIO_SECRET_KEY
+          value: "minioadmin"
+        resources:
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+      
+      - name: serving-ui
+        image: serving-layer:latest
+        imagePullPolicy: Never
+        command: ["streamlit", "run", "serving_layer/dashboard.py", "--server.port", "8501", "--server.address", "0.0.0.0", "--server.enableCORS", "false"]
+        ports:
+        - containerPort: 8501
+        env:
+        - name: API_URL
+          value: "http://localhost:8000"
+        resources:
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: serving-layer
+  namespace: default
+spec:
+  type: NodePort
+  selector:
+    app: serving-layer
+  ports:
+    - name: ui
+      port: 8501
+      targetPort: 8501
+      nodePort: 30001
+    - name: api
+      port: 8000
+      targetPort: 8000

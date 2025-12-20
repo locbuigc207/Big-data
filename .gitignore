@@ -69,6 +69,7 @@ logs/
 *.log
 *.out
 *.pid
+log.txt
 
 # Data, cache, and large artifacts (ignore generated data)
 data/

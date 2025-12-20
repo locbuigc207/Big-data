@@ -9,6 +9,7 @@ metadata:
   labels:
     strimzi.io/cluster: kafka-cluster
 spec:
+  topicName: auth_topic
   partitions: 3
   replicas: 3
   config:
@@ -24,6 +25,7 @@ metadata:
   labels:
     strimzi.io/cluster: kafka-cluster
 spec:
+  topicName: assessment_topic
   partitions: 5
   replicas: 3
   config:
@@ -39,6 +41,7 @@ metadata:
   labels:
     strimzi.io/cluster: kafka-cluster
 spec:
+  topicName: video_topic
   partitions: 5
   replicas: 3
   config:
@@ -54,6 +57,7 @@ metadata:
   labels:
     strimzi.io/cluster: kafka-cluster
 spec:
+  topicName: course_topic
   partitions: 3
   replicas: 3
   config:
@@ -69,6 +73,7 @@ metadata:
   labels:
     strimzi.io/cluster: kafka-cluster
 spec:
+  topicName: profile_topic
   partitions: 2
   replicas: 3
   config:
@@ -86,6 +91,7 @@ metadata:
   labels:
     strimzi.io/cluster: kafka-cluster
 spec:
+  topicName: notification_topic
   partitions: 3
   replicas: 3
   config:

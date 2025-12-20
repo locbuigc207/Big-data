@@ -10,6 +10,16 @@ spec:
   roles:
     - controller
     - broker
+  resources:
+    requests:
+      memory: 1Gi
+      cpu: 250m
+    limits:
+      memory: 1536Mi
+      cpu: 1000m
+  jvmOptions:
+    "-Xms": "512m"
+    "-Xmx": "1g"
   storage:
     type: jbod
     volumes:
@@ -39,6 +49,13 @@ spec:
         port: 9093
         type: internal
         tls: true
+      - name: external
+        port: 9094
+        type: nodeport
+        tls: false
+        configuration:
+          bootstrap:
+            nodePort: 30092
     config:
       offsets.topic.replication.factor: 3
       transaction.state.log.replication.factor: 3
@@ -46,5 +63,15 @@ spec:
       default.replication.factor: 3
       min.insync.replicas: 2
   entityOperator:
-    topicOperator: {}
-    userOperator: {}
+    topicOperator:
+      resources:
+        requests:
+          memory: 256Mi
+        limits:
+          memory: 512Mi
+    userOperator:
+      resources:
+        requests:
+          memory: 256Mi
+        limits:
+          memory: 512Mi

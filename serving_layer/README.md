@@ -1,71 +1,46 @@
-# Serving Layer (Unified Query Interface)
+# Serving Layer
 
-## Overview
+The Serving Layer provides a Unified Query Interface merging Batch and Speed layers.
+It consists of a REST API (FastAPI) and a Dashboard (Streamlit).
 
-The serving layer provides a unified query interface that merges batch views (historical, high-latency) with speed views (recent, low-latency) to answer queries with complete, up-to-date results.
+## Components
 
-## Status
-
-⏳ **TO BE IMPLEMENTED**
-
-## Planned Components
-
-### 1. Query Service (`serving_layer.py`)
-- Unified query interface
-- Merges batch + speed views
-- REST API endpoints
-
-### 2. View Merger
-- Combines precomputed batch views
-- Adds incremental speed layer updates
-- Handles overlapping data
-
-### 3. Query Optimization
-- Cache frequently accessed views
-- Lazy loading strategies
-- Query result caching
+- **`serving_layer.py`**: FastAPI backend to query MinIO.
+- **`dashboard.py`**: Streamlit frontend for visualization.
+- **`Dockerfile`**: Multi-use image for both components.
+- **`deployment.yaml`**: Kubernetes deployment/service.
 
 ## Architecture
 
 ```
-User Query → Serving Layer → ┌─ Batch Views (MinIO)
-                             └─ Speed Views (In-memory)
-                                      ↓
-                              Merged Result → Response
+User (Browser) 
+  ↓
+Serving Layer UI (Streamlit :8501)
+  ↓
+Serving Layer API (FastAPI :8000)
+  ↓
+MinIO (s3a://bucket-0)
+  ├── batch_views/ (Historical)
+  └── speed_views/ (Real-time)
 ```
 
-## Query Patterns
+## Running Locally (Docker)
 
-### Example: Student Video Engagement
+```bash
+# Build
+docker build -t serving-layer ./serving_layer
 
-```python
-# Batch view: Historical data (up to yesterday)
-batch_video = read_parquet("s3a://bucket-0/batch_views/video_total_watch_time")
+# Run API
+docker run -p 8000:8000 --env MINIO_ENDPOINT=http://host.docker.internal:9000 serving-layer uvicorn serving_layer:app --host 0.0.0.0
 
-# Speed view: Today's data (real-time)
-speed_video = read_stream("kafka://video_topic")
-
-# Merge: Complete view
-total_engagement = batch_video.union(speed_video).groupBy("user_id").sum("watch_time")
+# Run UI
+docker run -p 8501:8501 --env API_URL=http://host.docker.internal:8000 serving-layer streamlit run dashboard.py
 ```
 
-## API Endpoints (Planned)
+## Running on Kubernetes
 
-- `GET /api/v1/student/{id}/engagement` - Student engagement metrics
-- `GET /api/v1/video/{id}/analytics` - Video analytics
-- `GET /api/v1/course/{id}/statistics` - Course statistics
-- `GET /api/v1/dashboard/overview` - System-wide dashboard
+```bash
+kubectl apply -f serving_layer/deployment.yaml
+```
 
-## Technologies
-
-- Apache Spark (query engine)
-- Flask/FastAPI (REST API)
-- Redis (caching)
-- MinIO (batch view storage)
-
-## Next Steps
-
-1. Implement view merger logic
-2. Create REST API service
-3. Add caching layer
-4. Build dashboard UI
+Access the Dashboard at NodePort 30001 (e.g., `http://<minikube-ip>:30001`).

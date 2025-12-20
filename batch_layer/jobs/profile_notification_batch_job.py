@@ -7,22 +7,35 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, count, countDistinct, date_format, 
     sum as spark_sum, avg, max as spark_max, min as spark_min,
-    when, expr
+    when, expr,
+    from_json
 )
 from pyspark.sql.types import StructType, StructField, StringType, TimestampType
 import sys
 
-def create_spark_session():
-    """Initialize Spark Session with MinIO configuration"""
-    return SparkSession.builder \
-        .appName("Profile_Notification_Batch_Job") \
-        .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \
-        .config("spark.hadoop.fs.s3a.access.key", "minioadmin") \
-        .config("spark.hadoop.fs.s3a.secret.key", "minioadmin") \
-        .config("spark.hadoop.fs.s3a.path.style.access", "true") \
-        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
-        .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
-        .getOrCreate()
+from spark_config import create_spark_session, read_topic_data
+
+def get_profile_schema():
+    """Define schema for PROFILE events"""
+    return StructType([
+        StructField("event_category", StringType(), False),
+        StructField("event_type", StringType(), False),
+        StructField("user_id", StringType(), False),
+        StructField("timestamp", StringType(), False),
+        StructField("field_name", StringType(), True),
+        StructField("new_value", StringType(), True)
+    ])
+
+def get_notification_schema():
+    """Define schema for NOTIFICATION events"""
+    return StructType([
+        StructField("event_category", StringType(), False),
+        StructField("event_type", StringType(), False),
+        StructField("user_id", StringType(), False),
+        StructField("timestamp", StringType(), False),
+        StructField("notification_type", StringType(), True),
+        StructField("notification_id", StringType(), True)
+    ])
 
 # ============ PROFILE ANALYTICS ============
 
@@ -161,13 +174,18 @@ def compute_user_notification_summary(df_notif):
 
 def main(input_path, output_path):
     """Main batch job execution"""
-    spark = create_spark_session()
+    spark = create_spark_session("Profile_Notification_Batch_Job")
     spark.sparkContext.setLogLevel("WARN")
     
     # ========== PROFILE PROCESSING ==========
     print(f"[PROFILE BATCH] Reading profile events from: {input_path}")
-    df_profile_raw = spark.read.parquet(f"{input_path}/topic=profile_topic")
-    df_profile = df_profile_raw.withColumn("timestamp_parsed", col("timestamp").cast(TimestampType()))
+    df_profile_raw = read_topic_data(spark, input_path, "profile_topic")
+    
+    # Parse JSON body
+    profile_schema = get_profile_schema()
+    df_profile_parsed = df_profile_raw.withColumn("data", from_json(col("value").cast("string"), profile_schema)).select("data.*")
+
+    df_profile = df_profile_parsed.withColumn("timestamp_parsed", col("timestamp").cast(TimestampType()))
     
     print(f"[PROFILE BATCH] Total profile events: {df_profile.count()}")
     
@@ -189,8 +207,13 @@ def main(input_path, output_path):
     
     # ========== NOTIFICATION PROCESSING ==========
     print(f"[NOTIFICATION BATCH] Reading notification events from: {input_path}")
-    df_notif_raw = spark.read.parquet(f"{input_path}/topic=notification_topic")
-    df_notif = df_notif_raw.withColumn("timestamp_parsed", col("timestamp").cast(TimestampType()))
+    df_notif_raw = read_topic_data(spark, input_path, "notification_topic")
+
+    # Parse JSON body
+    notif_schema = get_notification_schema()
+    df_notif_parsed = df_notif_raw.withColumn("data", from_json(col("value").cast("string"), notif_schema)).select("data.*")
+
+    df_notif = df_notif_parsed.withColumn("timestamp_parsed", col("timestamp").cast(TimestampType()))
     
     print(f"[NOTIFICATION BATCH] Total notification events: {df_notif.count()}")
     

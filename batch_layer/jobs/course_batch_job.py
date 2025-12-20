@@ -7,26 +7,30 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, count, countDistinct, date_format, 
     sum as spark_sum, avg, max as spark_max, min as spark_min,
-    when, expr
+    when, expr,
+    from_json
 )
 from pyspark.sql.types import StructType, StructField, StringType, TimestampType, IntegerType
 import sys
 
-def create_spark_session():
-    """Initialize Spark Session with MinIO configuration"""
-    return SparkSession.builder \
-        .appName("Course_Batch_Job") \
-        .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \
-        .config("spark.hadoop.fs.s3a.access.key", "minioadmin") \
-        .config("spark.hadoop.fs.s3a.secret.key", "minioadmin") \
-        .config("spark.hadoop.fs.s3a.path.style.access", "true") \
-        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
-        .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
-        .getOrCreate()
+from spark_config import create_spark_session, read_topic_data
+
+def get_course_schema():
+    """Define schema for COURSE events"""
+    return StructType([
+        StructField("event_category", StringType(), False),
+        StructField("event_type", StringType(), False),
+        StructField("user_id", StringType(), False),
+        StructField("course_id", StringType(), False),
+        StructField("timestamp", StringType(), False),
+        StructField("material_id", StringType(), True),
+        StructField("material_type", StringType(), True),
+        StructField("resource_id", StringType(), True)
+    ])
 
 def compute_course_enrollment_stats(df):
     """Compute enrollment statistics per course"""
-    enrollments = df.filter(col("event_type") == "ENROLL_COURSE")
+    enrollments = df.filter(col("event_type") == "COURSE_ENROLLED")
     
     return enrollments.withColumn("date", date_format(col("timestamp_parsed"), "yyyy-MM-dd")) \
         .groupBy("date", "course_id") \
@@ -62,7 +66,7 @@ def compute_material_popularity(df):
 
 def compute_download_analytics(df):
     """Analyze download patterns"""
-    downloads = df.filter(col("event_type") == "DOWNLOAD_RESOURCE")
+    downloads = df.filter(col("event_type") == "DOWNLOAD_MATERIAL")
     
     return downloads.groupBy("user_id", "course_id") \
         .agg(
@@ -73,7 +77,7 @@ def compute_download_analytics(df):
 
 def compute_resource_download_stats(df):
     """Compute download statistics per resource"""
-    downloads = df.filter(col("event_type") == "DOWNLOAD_RESOURCE")
+    downloads = df.filter(col("event_type") == "DOWNLOAD_MATERIAL")
     
     return downloads.groupBy("course_id", "resource_id") \
         .agg(
@@ -85,7 +89,7 @@ def compute_resource_download_stats(df):
 def compute_course_activity_summary(df):
     """Comprehensive course activity summary per student"""
     # Enrollments
-    enrollments = df.filter(col("event_type") == "ENROLL_COURSE") \
+    enrollments = df.filter(col("event_type") == "COURSE_ENROLLED") \
         .groupBy("user_id") \
         .agg(countDistinct("course_id").alias("courses_enrolled"))
     
@@ -98,7 +102,7 @@ def compute_course_activity_summary(df):
         )
     
     # Downloads
-    downloads = df.filter(col("event_type") == "DOWNLOAD_RESOURCE") \
+    downloads = df.filter(col("event_type") == "DOWNLOAD_MATERIAL") \
         .groupBy("user_id") \
         .agg(count("resource_id").alias("total_downloads"))
     
@@ -123,9 +127,9 @@ def compute_course_overall_metrics(df):
     """Overall metrics per course (enrollments, material access, downloads)"""
     course_metrics = df.groupBy("course_id") \
         .agg(
-            count(when(col("event_type") == "ENROLL_COURSE", 1)).alias("total_enrollments"),
+            count(when(col("event_type") == "COURSE_ENROLLED", 1)).alias("total_enrollments"),
             count(when(col("event_type") == "ACCESS_COURSE_MATERIAL", 1)).alias("total_material_accesses"),
-            count(when(col("event_type") == "DOWNLOAD_RESOURCE", 1)).alias("total_downloads"),
+            count(when(col("event_type") == "DOWNLOAD_MATERIAL", 1)).alias("total_downloads"),
             countDistinct("user_id").alias("unique_students_interacting")
         ) \
         .orderBy(col("total_enrollments").desc())
@@ -134,16 +138,20 @@ def compute_course_overall_metrics(df):
 
 def main(input_path, output_path):
     """Main batch job execution"""
-    spark = create_spark_session()
+    spark = create_spark_session("Course_Batch_Job")
     spark.sparkContext.setLogLevel("WARN")
     
     print(f"[COURSE BATCH] Reading course events from: {input_path}")
     
     # Read raw course events from MinIO
-    df_raw = spark.read.parquet(f"{input_path}/topic=course_topic")
+    df_raw = read_topic_data(spark, input_path, "course_topic")
     
+    # Parse JSON body
+    json_schema = get_course_schema()
+    df_parsed = df_raw.withColumn("data", from_json(col("value").cast("string"), json_schema)).select("data.*")
+
     # Parse timestamp
-    df = df_raw.withColumn("timestamp_parsed", col("timestamp").cast(TimestampType()))
+    df = df_parsed.withColumn("timestamp_parsed", col("timestamp").cast(TimestampType()))
     
     print(f"[COURSE BATCH] Total course events: {df.count()}")
     

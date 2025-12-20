@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: speed-layer
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: speed-layer
+  template:
+    metadata:
+      labels:
+        app: speed-layer
+    spec:
+      containers:
+      - name: speed-layer
+        image: speed-layer:latest
+        imagePullPolicy: Never  # Use local Minikube image
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-cluster-kafka-bootstrap.kafka.svc:9092"
+        - name: MINIO_ENDPOINT
+          value: "http://minio.minio.svc:9000"
+        - name: MINIO_ACCESS_KEY
+          value: "minioadmin"
+        - name: MINIO_SECRET_KEY
+          value: "minioadmin"
+        resources:
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+          requests:
+            memory: "1Gi"
+            cpu: "1000m"

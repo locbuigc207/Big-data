@@ -7,22 +7,13 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, count, countDistinct, date_format, 
     min as spark_min, max as spark_max, avg, sum as spark_sum,
-    unix_timestamp, when, expr, datediff, lit
+    unix_timestamp, when, expr, datediff, lit,
+    from_json
 )
 from pyspark.sql.types import StructType, StructField, StringType, TimestampType, IntegerType
 import sys
 
-def create_spark_session():
-    """Initialize Spark Session with MinIO configuration"""
-    return SparkSession.builder \
-        .appName("Assessment_Batch_Job") \
-        .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \
-        .config("spark.hadoop.fs.s3a.access.key", "minioadmin") \
-        .config("spark.hadoop.fs.s3a.secret.key", "minioadmin") \
-        .config("spark.hadoop.fs.s3a.path.style.access", "true") \
-        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
-        .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
-        .getOrCreate()
+from spark_config import create_spark_session, read_topic_data
 
 def get_assessment_schema():
     """Define schema for ASSESSMENT events"""
@@ -176,16 +167,20 @@ def compute_student_overall_performance(df):
 
 def main(input_path, output_path):
     """Main batch job execution"""
-    spark = create_spark_session()
+    spark = create_spark_session("Assessment_Batch_Job")
     spark.sparkContext.setLogLevel("WARN")
     
     print(f"[ASSESSMENT BATCH] Reading assessment events from: {input_path}")
     
     # Read raw assessment events from MinIO
-    df_raw = spark.read.parquet(f"{input_path}/topic=assessment_topic")
+    df_raw = read_topic_data(spark, input_path, "assessment_topic")
     
+    # Parse JSON body
+    json_schema = get_assessment_schema()
+    df_parsed = df_raw.withColumn("data", from_json(col("value").cast("string"), json_schema)).select("data.*")
+
     # Parse timestamp
-    df = df_raw.withColumn("timestamp_parsed", col("timestamp").cast(TimestampType()))
+    df = df_parsed.withColumn("timestamp_parsed", col("timestamp").cast(TimestampType()))
     
     print(f"[ASSESSMENT BATCH] Total assessment events: {df.count()}")
     
