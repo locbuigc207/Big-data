@@ -2,7 +2,9 @@ from fastapi import FastAPI, HTTPException
 import pandas as pd
 import os
 import s3fs
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+import pytz
+vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
 
 app = FastAPI(title="University Learning Analytics API")
 
@@ -47,8 +49,6 @@ def get_summary_metrics():
     Get all key metrics for dashboard overview in one call
     Returns: current active users, total courses, total students, system health
     """
-    from datetime import datetime, timedelta
-    
     summary = {
         "current_active_users": 0,
         "total_active_courses": 0,
@@ -57,14 +57,18 @@ def get_summary_metrics():
         "speed_layer_status": "unknown"
     }
     
-    # Current active users from speed layer
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    
     df_speed = read_parquet("speed_views/active_users")
     if not df_speed.empty:
-        df_speed['start'] = pd.to_datetime(df_speed['start'])
+        df_speed['start'] = pd.to_datetime(df_speed['start'], utc=True).dt.tz_localize(None)
         latest = df_speed.sort_values('start', ascending=False).iloc[0]
         summary["current_active_users"] = int(latest['active_users'])
-        # Speed layer is healthy if data is recent (within last 5 minutes)
-        if (datetime.now() - latest['start']).total_seconds() < 300:
+        
+        # Speed layer writes in UTC by default. Compare with UTC now.
+        diff_seconds = (now_utc - latest['start']).total_seconds()
+        
+        if diff_seconds < 300: # 5 mins threshold for safety
             summary["speed_layer_status"] = "healthy"
         else:
             summary["speed_layer_status"] = "stale"
@@ -72,8 +76,8 @@ def get_summary_metrics():
     # Total active courses (courses with recent activity in last 24 hours)
     df_course_pop = read_parquet("speed_views/course_popularity")
     if not df_course_pop.empty:
-        df_course_pop['end'] = pd.to_datetime(df_course_pop['end'])
-        cutoff = datetime.now() - timedelta(hours=24)
+        df_course_pop['end'] = pd.to_datetime(df_course_pop['end'], utc=True).dt.tz_localize(None)
+        cutoff = now_utc - timedelta(hours=24)
         recent_courses = df_course_pop[df_course_pop['end'] >= cutoff]['course_id'].nunique()
         summary["total_active_courses"] = int(recent_courses)
     
@@ -95,9 +99,10 @@ def get_recent_activity(hours: int = 1):
     Get recent activity stats for content consumption
     Returns: videos watched, materials downloaded in last N hours
     """
-    from datetime import datetime, timedelta
+    from datetime import timedelta
     
-    cutoff = datetime.now() - timedelta(hours=hours)
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = now_utc - timedelta(hours=hours)
     
     activity = {
         "videos_watched": 0,
@@ -108,7 +113,7 @@ def get_recent_activity(hours: int = 1):
     # Videos from speed layer
     df_video = read_parquet("speed_views/video_engagement")
     if not df_video.empty:
-        df_video['end'] = pd.to_datetime(df_video['end'])
+        df_video['end'] = pd.to_datetime(df_video['end'], utc=True).dt.tz_localize(None)
         recent_videos = df_video[df_video['end'] >= cutoff]
         activity["videos_watched"] = int(recent_videos['views'].sum())
     
@@ -166,16 +171,14 @@ def get_student_engagement_distribution():
 def get_daily_active_users(hours: int = 6):
     """
     Get DAU by merging Batch Layer (Historical) and Speed Layer (Real-time)
-    Default returns last 6 hours for performance
     """
-    from datetime import datetime, timedelta
-    
     # 1. Read Batch Data (Historical) - filter to recent hours
     # Batch path: batch_views/auth_daily_active_users
     # Schema: date, daily_active_users, total_sessions
     df_batch = read_parquet("batch_views/auth_daily_active_users")
+    now_vn = datetime.now(vn_tz).replace(tzinfo=None)
     if not df_batch.empty:
-        cutoff_time = datetime.now() - timedelta(hours=hours)
+        cutoff_time = now_vn - timedelta(hours=hours)
         df_batch['date'] = pd.to_datetime(df_batch['date'])
         df_batch = df_batch[df_batch['date'] >= cutoff_time]
     
@@ -183,10 +186,15 @@ def get_daily_active_users(hours: int = 6):
     # Speed path: speed_views/active_users
     # Schema: start, end, active_users
     df_speed = read_parquet("speed_views/active_users")
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    
     if not df_speed.empty:
-        cutoff_time = datetime.now() - timedelta(hours=hours)
-        df_speed['start'] = pd.to_datetime(df_speed['start'])
+        cutoff_time = now_utc - timedelta(hours=hours)
+        df_speed['start'] = pd.to_datetime(df_speed['start'], utc=True).dt.tz_localize(None)
         df_speed = df_speed[df_speed['start'] >= cutoff_time]
+        
+        # Convert UTC back to VN for display
+        df_speed['start'] = df_speed['start'] + timedelta(hours=7)
     
     # Process Speed Data to match Batch Schema
     # Aggregating real-time windows to "Today's" count is an approximation.

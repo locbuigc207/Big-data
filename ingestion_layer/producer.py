@@ -37,8 +37,11 @@ VIDEO_IDS = [f"VID{i:03d}" for i in range(1, 201)]  # 200 videos
 # Session tracking (để mô phỏng thực tế hơn)
 active_sessions = {}
 
+import pytz
+vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
+
 def get_timestamp():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(vn_tz).strftime("%Y-%m-%d %H:%M:%S")
 
 # --- PRODUCER FUNCTIONS ---
 

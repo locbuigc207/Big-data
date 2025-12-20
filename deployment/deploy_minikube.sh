@@ -1,4 +1,6 @@
 #!/bin/bash
+# System Configuration
+export TZ=Asia/Ho_Chi_Minh
 
 # Quick Start Script for Minikube Testing on Linux
 # Run this script to deploy everything at once
@@ -154,18 +156,18 @@ echo ""
 echo -e "${YELLOW}Starting Batch Ingestion Layer...${NC}"
 echo "   Reading from Kafka ($KAFKA_BOOTSTRAP_SERVERS) → Writing to MinIO ($MINIO_ENDPOINT)"
 # Explicitly pass env vars for safety
-KAFKA_BOOTSTRAP_SERVERS=$KAFKA_BOOTSTRAP_SERVERS MINIO_ENDPOINT=$MINIO_ENDPOINT python3 ingestion_layer/minio_ingest_k8s.py > /tmp/ingestion.log 2>&1 &
+KAFKA_BOOTSTRAP_SERVERS=$KAFKA_BOOTSTRAP_SERVERS MINIO_ENDPOINT=$MINIO_ENDPOINT ./venv/bin/python3 ingestion_layer/minio_ingest_k8s.py > /tmp/ingestion.log 2>&1 &
 INGESTION_PID=$!
 echo $INGESTION_PID > /tmp/ingestion.pid
 sleep 5
 echo -e "${GREEN}✅ Batch Ingestion started (PID: $INGESTION_PID)${NC}"
 echo "   Logs: /tmp/ingestion.log"
 echo ""
-
+ 
 # Start Producer
 echo -e "${YELLOW}Starting Event Producer...${NC}"
 echo "   Generating events → Kafka topics"
-python3 ingestion_layer/producer.py > /tmp/producer.log 2>&1 &
+./venv/bin/python3 ingestion_layer/producer.py > /tmp/producer.log 2>&1 &
 PRODUCER_PID=$!
 echo $PRODUCER_PID > /tmp/producer.pid
 sleep 3

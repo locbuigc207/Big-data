@@ -42,6 +42,7 @@ spark = SparkSession.builder \
     .config("spark.hadoop.fs.s3a.threads.keepalivetime", "60") \
     .config("spark.hadoop.fs.s3a.connection.ttl", "60000") \
     .config("spark.hadoop.fs.s3a.assumed.role.session.duration", "3600") \
+    .config("spark.sql.session.timeZone", "Asia/Ho_Chi_Minh") \
     .getOrCreate()
 
 spark.sparkContext.setLogLevel("WARN")
@@ -121,8 +122,8 @@ df_parsed = df_kafka.selectExpr("CAST(value AS STRING)") \
 df_clean = df_parsed.withColumn("timestamp", col("timestamp").cast("timestamp")) \
     .withColumn("processing_time", current_timestamp())
 
-# Define Watermark for handling late data
-df_watermarked = df_clean.withWatermark("timestamp", "2 minutes")
+# Define Watermark - Reduced to 1 minute to decrease dashboard lag
+df_watermarked = df_clean.withWatermark("timestamp", "1 minute")
 
 # 2. DEFINE AGGREGATIONS
 
@@ -185,7 +186,7 @@ query_dau = rt_active_users.writeStream \
     .format("parquet") \
     .option("path", "s3a://bucket-0/speed_views/active_users") \
     .option("checkpointLocation", "s3a://bucket-0/checkpoints/active_users") \
-    .trigger(processingTime="1 minute") \
+    .trigger(processingTime="30 seconds") \
     .start()
 
 # Write Stream 2: Course Popularity
@@ -194,7 +195,7 @@ query_course = rt_course_popularity.writeStream \
     .format("parquet") \
     .option("path", "s3a://bucket-0/speed_views/course_popularity") \
     .option("checkpointLocation", "s3a://bucket-0/checkpoints/course_popularity") \
-    .trigger(processingTime="1 minute") \
+    .trigger(processingTime="30 seconds") \
     .start()
 
 # Write Stream 3: Video Engagement
@@ -203,7 +204,7 @@ query_video = rt_video_engagement.writeStream \
     .format("parquet") \
     .option("path", "s3a://bucket-0/speed_views/video_engagement") \
     .option("checkpointLocation", "s3a://bucket-0/checkpoints/video_engagement") \
-    .trigger(processingTime="1 minute") \
+    .trigger(processingTime="30 seconds") \
     .start()
 
 # Console output disabled to save memory
